@@ -171,7 +171,7 @@ namespace IntegrationServer.Servers.Blackout.GG_D
                     {
                         m_nTransID++;
 
-                        UInt16 nStartAddr = 10;  // 입력포트 주소 (30011)
+                        UInt16 nStartAddr = m_parentManager.StartAddress;  // 입력포트 주소 (setting.json Modbus_StartAddress, 기본 10 = 30011)
                         UInt16 nLength = RequestLength; // 데이터 읽을 갯수
                         int nSlaveID = 1;   // SlaveID
 

@@ -186,7 +186,7 @@ namespace IntegrationServer.Servers
                         m_dicServerDatas[item.SeqNo] = new Fire.JTECH.JTECHManager(this, m_dataManager, item.SOPWebServerURL, item.SeqNo, item.SiteID, item.IP, item.Port, item.ServerAlias, item.Use);
                         break;
                     case (int)ServerTypes.Blackout_GG_D:
-                        m_dicServerDatas[item.SeqNo] = new Blackout.GG_D.BlackoutGGDManager(this, m_dataManager, item.SOPWebServerURL, item.SeqNo, item.SiteID, item.IP, item.Port, item.ServerAlias, item.Use);
+                        m_dicServerDatas[item.SeqNo] = new Blackout.GG_D.BlackoutGGDManager(this, m_dataManager, item.SOPWebServerURL, item.SeqNo, item.SiteID, item.IP, item.Port, item.ServerAlias, item.Use, item.ServerProperties);
                         break;
                     case (int)ServerTypes.Fms_SumpPit_GG_D:
                         m_dicServerDatas[item.SeqNo] = new FMS.GG_D.SumpPitGGDManager(this, m_dataManager, item.SOPWebServerURL, item.SeqNo, item.SiteID, item.IP, item.Port, item.ServerAlias, item.Use);

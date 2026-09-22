@@ -65,10 +65,17 @@ namespace IntegrationServer.Servers.Blackout.GG_D
 
         // 시스윌로 마지막에 전달한 상전압과 정전 판정 결과
         private bool m_bSyswillUpdated = false;
-        private UInt32 m_nSyswillVolA = 0, m_nSyswillVolB = 0, m_nSyswillVolC = 0;
+        private int m_nSyswillVolA = 0, m_nSyswillVolB = 0, m_nSyswillVolC = 0;
         private bool m_bSyswillIsAlarm = false;
 
-        public BlackoutGGDManager(ServerManager serverManager, DataManager dataManager, string strSOPWebServerURL, int nServerSeqNo, int nSiteID, string strServerIP, int nPort, string strServerAlias, bool use)
+        // setting.json ServerProperties : 상전압 읽기 시작 주소와 FLOAT32 워드 순서
+        // 워드 순서를 지정하지 않으면 예전처럼 4바이트를 UInt32로 해석한다.
+        private UInt16 m_nStartAddress = 10;
+        public UInt16 StartAddress { get { return m_nStartAddress; } }
+
+        private string m_strWordOrder = null;
+
+        public BlackoutGGDManager(ServerManager serverManager, DataManager dataManager, string strSOPWebServerURL, int nServerSeqNo, int nSiteID, string strServerIP, int nPort, string strServerAlias, bool use, Dictionary<ServerProperty, object> properties)
             : base(dataManager, nSiteID)
         {
             m_serverManager = serverManager;
@@ -83,6 +90,8 @@ namespace IntegrationServer.Servers.Blackout.GG_D
             this.SOPWebServerURL = strSOPWebServerURL;
             m_nSiteID = nSiteID;
             m_use = use;
+
+            LoadProperties(properties);
 
             Init();
 
@@ -146,6 +155,7 @@ namespace IntegrationServer.Servers.Blackout.GG_D
 
         public void Start()
         {
+            WriteLog($"상전압 시작 주소 : {m_nStartAddress}, 워드 순서 : {m_strWordOrder ?? "UInt32"}", LogTypes.Info);
             m_provider.Start();
             m_isStarted = true;
         }
@@ -156,42 +166,101 @@ namespace IntegrationServer.Servers.Blackout.GG_D
             m_isStarted = false;
         }
 
+        private void LoadProperties(Dictionary<ServerProperty, object> properties)
+        {
+            object value;
+
+            if (properties != null && properties.TryGetValue(ServerProperty.Modbus_StartAddress, out value) && value != null)
+            {
+                try
+                {
+                    m_nStartAddress = Convert.ToUInt16(value);
+                }
+                catch (Exception e)
+                {
+                    WriteLog($"Modbus_StartAddress 설정값 오류 ({value}) : {e.Message}. 기본값 {m_nStartAddress} 사용", LogTypes.Error);
+                }
+            }
+
+            if (properties != null && properties.TryGetValue(ServerProperty.Modbus_WordOrder, out value) && value != null)
+            {
+                string strWordOrder = value.ToString().Trim().ToUpper();
+
+                if (strWordOrder == "ABCD" || strWordOrder == "CDAB" || strWordOrder == "BADC" || strWordOrder == "DCBA")
+                    m_strWordOrder = strWordOrder;
+                else
+                    WriteLog($"Modbus_WordOrder 설정값 오류 ({value}). UInt32로 해석", LogTypes.Error);
+            }
+        }
+
+        // 수신한 4바이트(레지스터 2개, 수신 순서 그대로)를 설정한 워드 순서에 따라 값으로 변환한다.
+        private double ToVoltage(byte[] arrData, int nOffset, bool bIsReverse)
+        {
+            byte[] arr = new byte[ClientProvider.FloatLeng];
+
+            if (m_strWordOrder == null)
+            {
+                Array.Copy(arrData, nOffset, arr, 0, ClientProvider.FloatLeng);
+
+                if (bIsReverse)
+                    Array.Reverse(arr);
+
+                return BitConverter.ToUInt32(arr, 0);
+            }
+
+            // 빅엔디안 ABCD 순서로 맞춘다.
+            byte r0 = arrData[nOffset], r1 = arrData[nOffset + 1], r2 = arrData[nOffset + 2], r3 = arrData[nOffset + 3];
+            switch (m_strWordOrder)
+            {
+                case "CDAB": arr[0] = r2; arr[1] = r3; arr[2] = r0; arr[3] = r1; break;
+                case "BADC": arr[0] = r1; arr[1] = r0; arr[2] = r3; arr[3] = r2; break;
+                case "DCBA": arr[0] = r3; arr[1] = r2; arr[2] = r1; arr[3] = r0; break;
+                default:     arr[0] = r0; arr[1] = r1; arr[2] = r2; arr[3] = r3; break;
+            }
+
+            if (BitConverter.IsLittleEndian)
+                Array.Reverse(arr);
+
+            return BitConverter.ToSingle(arr, 0);
+        }
+
+        // 시스윌 tb_blackout_info 전압 컬럼(int)에 기록할 값
+        private static int ToSyswillVoltage(double value)
+        {
+            if (double.IsNaN(value))
+                return 0;
+
+            if (value >= int.MaxValue)
+                return int.MaxValue;
+
+            if (value <= int.MinValue)
+                return int.MinValue;
+
+            return (int)Math.Round(value);
+        }
+
         public void CheckAlarm(byte[] arrData, bool bIsReverse = true)
         {
             if (arrData == null || arrData.Length == 0 || arrData.Length != ClientProvider.RequestLength * ClientProvider.RegisterLength)
                 return;
 
-            byte[] arr2000 = new byte[ClientProvider.FloatLeng];
-            byte[] arr2002 = new byte[ClientProvider.FloatLeng];
-            byte[] arr2004 = new byte[ClientProvider.FloatLeng];
-
-            Array.Copy(arrData, 0, arr2000, 0, ClientProvider.FloatLeng);
-            Array.Copy(arrData, (2 * ClientProvider.RegisterLength), arr2002, 0, ClientProvider.FloatLeng);
-            Array.Copy(arrData, (4 * ClientProvider.RegisterLength), arr2004, 0, ClientProvider.FloatLeng);
-
-            if (bIsReverse)
-            {
-                Array.Reverse(arr2000);
-                Array.Reverse(arr2002);
-                Array.Reverse(arr2004);
-            }
-
-            UInt32 fVolA = BitConverter.ToUInt32(arr2000, 0);
-            UInt32 fVolB = BitConverter.ToUInt32(arr2002, 0);
-            UInt32 fVolC = BitConverter.ToUInt32(arr2004, 0);
+            double fVolA = ToVoltage(arrData, 0, bIsReverse);
+            double fVolB = ToVoltage(arrData, (2 * ClientProvider.RegisterLength), bIsReverse);
+            double fVolC = ToVoltage(arrData, (4 * ClientProvider.RegisterLength), bIsReverse);
 
             WriteLog($"CheckAlarm 데이터 상전압 A: {fVolA}, 상전압 B: {fVolB}, 상전압 C: {fVolC}", LogTypes.Info);
 
             bool isBlackout = fVolA <= 5000 || fVolB <= 5000 || fVolC <= 5000;
 
             // 시스윌 연동 : SOP 알람 상태 전이와 무관하게 상전압이나 정전 판정 결과가 바뀌면 전달한다.
-            if (m_bSyswillUpdated == false || m_nSyswillVolA != fVolA || m_nSyswillVolB != fVolB || m_nSyswillVolC != fVolC || m_bSyswillIsAlarm != isBlackout)
+            int nVolA = ToSyswillVoltage(fVolA), nVolB = ToSyswillVoltage(fVolB), nVolC = ToSyswillVoltage(fVolC);
+            if (m_bSyswillUpdated == false || m_nSyswillVolA != nVolA || m_nSyswillVolB != nVolB || m_nSyswillVolC != nVolC || m_bSyswillIsAlarm != isBlackout)
             {
-                if (UpdateBlackout((int)fVolA, (int)fVolB, (int)fVolC, isBlackout, m_dataManager, this.Logger, ServerType, m_nServerSeqNo))
+                if (UpdateBlackout(nVolA, nVolB, nVolC, isBlackout, m_dataManager, this.Logger, ServerType, m_nServerSeqNo))
                 {
-                    m_nSyswillVolA = fVolA;
-                    m_nSyswillVolB = fVolB;
-                    m_nSyswillVolC = fVolC;
+                    m_nSyswillVolA = nVolA;
+                    m_nSyswillVolB = nVolB;
+                    m_nSyswillVolC = nVolC;
                     m_bSyswillIsAlarm = isBlackout;
                     m_bSyswillUpdated = true;
                 }
