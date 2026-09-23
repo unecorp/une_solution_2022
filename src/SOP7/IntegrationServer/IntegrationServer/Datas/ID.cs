@@ -58,7 +58,11 @@ namespace IntegrationServer.Datas
         /// Modbus 계측기 : 읽기 시작 주소(0부터 시작하는 PDU 주소, 예: 30029 -> 28)와 FLOAT32 워드 순서(ABCD, CDAB, BADC, DCBA)
         /// </summary>
         Modbus_StartAddress,
-        Modbus_WordOrder
+        Modbus_WordOrder,
+        /// <summary>
+        /// Modbus 계측기 : 읽은 값에 곱할 배율(기본 1). 예를 들어 0.1kV 단위로 보내면 100
+        /// </summary>
+        Modbus_ValueScale
     }
 
     public enum DbTypes

@@ -75,6 +75,8 @@ namespace IntegrationServer.Servers.Blackout.GG_D
 
         private string m_strWordOrder = null;
 
+        private double m_dValueScale = 1.0;
+
         public BlackoutGGDManager(ServerManager serverManager, DataManager dataManager, string strSOPWebServerURL, int nServerSeqNo, int nSiteID, string strServerIP, int nPort, string strServerAlias, bool use, Dictionary<ServerProperty, object> properties)
             : base(dataManager, nSiteID)
         {
@@ -155,7 +157,7 @@ namespace IntegrationServer.Servers.Blackout.GG_D
 
         public void Start()
         {
-            WriteLog($"상전압 시작 주소 : {m_nStartAddress}, 워드 순서 : {m_strWordOrder ?? "UInt32"}", LogTypes.Info);
+            WriteLog($"상전압 시작 주소 : {m_nStartAddress}, 워드 순서 : {m_strWordOrder ?? "UInt32"}, 배율 : {m_dValueScale}", LogTypes.Info);
             m_provider.Start();
             m_isStarted = true;
         }
@@ -191,6 +193,23 @@ namespace IntegrationServer.Servers.Blackout.GG_D
                 else
                     WriteLog($"Modbus_WordOrder 설정값 오류 ({value}). UInt32로 해석", LogTypes.Error);
             }
+
+            if (properties != null && properties.TryGetValue(ServerProperty.Modbus_ValueScale, out value) && value != null)
+            {
+                try
+                {
+                    double dScale = Convert.ToDouble(value);
+
+                    if (dScale > 0)
+                        m_dValueScale = dScale;
+                    else
+                        WriteLog($"Modbus_ValueScale 설정값 오류 ({value}). 배율 {m_dValueScale} 사용", LogTypes.Error);
+                }
+                catch (Exception e)
+                {
+                    WriteLog($"Modbus_ValueScale 설정값 오류 ({value}) : {e.Message}. 배율 {m_dValueScale} 사용", LogTypes.Error);
+                }
+            }
         }
 
         // 수신한 4바이트(레지스터 2개, 수신 순서 그대로)를 설정한 워드 순서에 따라 값으로 변환한다.
@@ -205,7 +224,7 @@ namespace IntegrationServer.Servers.Blackout.GG_D
                 if (bIsReverse)
                     Array.Reverse(arr);
 
-                return BitConverter.ToUInt32(arr, 0);
+                return BitConverter.ToUInt32(arr, 0) * m_dValueScale;
             }
 
             // 빅엔디안 ABCD 순서로 맞춘다.
@@ -221,7 +240,7 @@ namespace IntegrationServer.Servers.Blackout.GG_D
             if (BitConverter.IsLittleEndian)
                 Array.Reverse(arr);
 
-            return BitConverter.ToSingle(arr, 0);
+            return BitConverter.ToSingle(arr, 0) * m_dValueScale;
         }
 
         // 시스윌 tb_blackout_info 전압 컬럼(int)에 기록할 값
